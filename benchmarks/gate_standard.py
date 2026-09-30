@@ -138,7 +138,8 @@ def main() -> None:
 
     rows: List[dict] = []
     for s in a.suites.split(","):
-        rows += jabr_rows() if s == "jabr_v2" else probe_rows() if s == "probes" else jev_rows(s.split("_", 1)[1])
+        rows += (jabr_rows() if s == "jabr_v2" else probe_rows() if s == "probes"
+                 else judge_rows() if s == "judge_heldout" else jev_rows(s.split("_", 1)[1]))
     print(f"{len(rows)} items across {a.suites}")
     cache_dir = os.path.join(ROOT, "benchmarks/data/gate_cache")
     os.makedirs(cache_dir, exist_ok=True)
@@ -153,11 +154,12 @@ def main() -> None:
               "jev_hard": [r for r in rows if r["suite"] == "jev_hard"]}
     groups["jev_easy"] = [r for r in rows if r["suite"] == "jev_easy"]
     groups["probes"] = [r for r in rows if r["suite"] == "probes"]
+    groups["judge_heldout"] = [r for r in rows if r["suite"] == "judge_heldout"]
     groups["heldout_jabr+probes"] = groups["jabr_v2"] + groups["probes"]
     groups["pooled_standard+jabr"] = groups["jev_standard"] + groups["jabr_v2"]
     groups["pooled_all"] = rows
     groups = {k: v for k, v in groups.items() if v}
-    for suite in ("jev_standard", "probes"):
+    for suite in ("jev_standard", "probes", "judge_heldout"):
         for fam in sorted({r["family"] for r in groups.get(suite, []) if r["family"]}):
             groups[f"{suite}/{fam}"] = [r for r in groups[suite] if r["family"] == fam]
     for name, g in groups.items():
