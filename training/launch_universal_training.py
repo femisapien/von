@@ -110,8 +110,8 @@ echo "Detected $NUM_GPUS GPUs. Starting PyTorch DDP training with 8,192 Context 
     {independent_options_flag} \\
     --epochs {epochs} \\
     --lr {lr} \\
-    --batch_size 8 \\
-    --grad_accum_steps 2 \\
+    --batch_size {batch_size} \\
+    --grad_accum_steps {grad_accum} \\
     --max_position_embeddings 8192 \\
     --long_ratio {long_ratio} \\
     --s3_target {s3_target} \\
@@ -144,6 +144,8 @@ def launch(
     overlap_target: float = 0.32,
     synthetic_n: int = 0,
     extra_train_s3: str = "",
+    batch_size: int = 8,
+    grad_accum: int = 2,
     init_checkpoint_s3: str = "",
     independent_options: bool = False,
     base_model_id: str = "wfzyx/von",
@@ -225,6 +227,8 @@ def launch(
             overlap_target=overlap_target,
             synthetic_n=synthetic_n,
             extra_train_block=extra_train_block,
+            batch_size=batch_size,
+            grad_accum=grad_accum,
             init_ckpt_block=init_ckpt_block,
             init_ckpt_flag=init_ckpt_flag,
             independent_options_flag="--independent_options" if independent_options else "",
@@ -304,6 +308,8 @@ if __name__ == "__main__":
     parser.add_argument("--s3-target", type=str, default=S3_TARGET,
                         help="S3 prefix for checkpoints. Defaults to the SHIPPED weights "
                              "prefix, so point experiments somewhere else.")
+    parser.add_argument("--batch-size", type=int, default=8, help="per-GPU micro-batch; 4 when the corpus has ~1k-token rows")
+    parser.add_argument("--grad-accum", type=int, default=2)
     parser.add_argument("--extra-train-s3", default="", help="S3 jsonl of extra rows appended to the built corpus")
     parser.add_argument("--synthetic-n", type=int, default=0,
                         help="rows of synthetic two-hop/numeric decisions to mix in (0 = off)")
@@ -329,6 +335,8 @@ if __name__ == "__main__":
         overlap_target=args.overlap_target,
         synthetic_n=args.synthetic_n,
         extra_train_s3=args.extra_train_s3,
+        batch_size=args.batch_size,
+        grad_accum=args.grad_accum,
         init_checkpoint_s3=args.init_checkpoint_s3,
         base_encoder_s3=args.base_encoder_s3,
         independent_options=args.independent_options,
