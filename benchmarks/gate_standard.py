@@ -69,6 +69,18 @@ def jabr_rows() -> List[dict]:
     return out
 
 
+def probe_rows() -> List[dict]:
+    """Hagetino's von-shadow coding-agent probes (issue #21): 38 Choice + 14 Noul, held out from all training."""
+    out = []
+    with open(os.path.join(ROOT, "benchmarks/data/probes_von_shadow.jsonl"), encoding="utf-8") as f:
+        for i, line in enumerate(f):
+            if line.strip():
+                r = json.loads(line)
+                r["id"] = f"probe:{r['family']}:{i}"
+                out.append(r)
+    return out
+
+
 def hit(row: dict, pick) -> bool:
     exp = row["expected"]
     if row["type"] == "noul":
@@ -126,7 +138,7 @@ def main() -> None:
 
     rows: List[dict] = []
     for s in a.suites.split(","):
-        rows += jabr_rows() if s == "jabr_v2" else jev_rows(s.split("_", 1)[1])
+        rows += jabr_rows() if s == "jabr_v2" else probe_rows() if s == "probes" else jev_rows(s.split("_", 1)[1])
     print(f"{len(rows)} items across {a.suites}")
     cache_dir = os.path.join(ROOT, "benchmarks/data/gate_cache")
     os.makedirs(cache_dir, exist_ok=True)
@@ -140,11 +152,14 @@ def main() -> None:
               "jabr_v2": [r for r in rows if r["suite"] == "jabr_v2"],
               "jev_hard": [r for r in rows if r["suite"] == "jev_hard"]}
     groups["jev_easy"] = [r for r in rows if r["suite"] == "jev_easy"]
+    groups["probes"] = [r for r in rows if r["suite"] == "probes"]
+    groups["heldout_jabr+probes"] = groups["jabr_v2"] + groups["probes"]
     groups["pooled_standard+jabr"] = groups["jev_standard"] + groups["jabr_v2"]
     groups["pooled_all"] = rows
     groups = {k: v for k, v in groups.items() if v}
-    for fam in sorted({r["family"] for r in groups["jev_standard"] if r["family"]}):
-        groups[f"jev_standard/{fam}"] = [r for r in groups["jev_standard"] if r["family"] == fam]
+    for suite in ("jev_standard", "probes"):
+        for fam in sorted({r["family"] for r in groups.get(suite, []) if r["family"]}):
+            groups[f"{suite}/{fam}"] = [r for r in groups[suite] if r["family"] == fam]
     for name, g in groups.items():
         if not g:
             continue
