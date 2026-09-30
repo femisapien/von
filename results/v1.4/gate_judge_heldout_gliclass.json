@@ -1,0 +1,91 @@
+{
+ "base": "checkpoints/von-1.2",
+ "cand": "/home/wfzyx/scratch/ckpt/von-1.4-gliclass-init",
+ "cand_chains": "",
+ "gates": {
+  "judge_heldout": {
+   "label": "judge_heldout",
+   "n": 300,
+   "acc_baseline": 0.5166666666666667,
+   "acc_candidate": 0.5766666666666667,
+   "delta_pp": 5.999999999999995,
+   "discordant_base_only": 37,
+   "discordant_cand_only": 55,
+   "mcnemar_p": 0.07576023576406506,
+   "mde_pp_80pct": 8.082984976737816,
+   "verdict": "UNRESOLVABLE"
+  },
+  "pooled_all": {
+   "label": "pooled_all",
+   "n": 300,
+   "acc_baseline": 0.5166666666666667,
+   "acc_candidate": 0.5766666666666667,
+   "delta_pp": 5.999999999999995,
+   "discordant_base_only": 37,
+   "discordant_cand_only": 55,
+   "mcnemar_p": 0.07576023576406506,
+   "mde_pp_80pct": 8.082984976737816,
+   "verdict": "UNRESOLVABLE"
+  },
+  "judge_heldout/anthropic_hhh": {
+   "label": "judge_heldout/anthropic_hhh",
+   "n": 30,
+   "acc_baseline": 0.7,
+   "acc_candidate": 0.7333333333333333,
+   "delta_pp": 3.3333333333333326,
+   "discordant_base_only": 4,
+   "discordant_cand_only": 5,
+   "mcnemar_p": 1.0,
+   "mde_pp_80pct": 23.439741804374684,
+   "verdict": "UNRESOLVABLE"
+  },
+  "judge_heldout/helpsteer3_val": {
+   "label": "judge_heldout/helpsteer3_val",
+   "n": 120,
+   "acc_baseline": 0.4666666666666667,
+   "acc_candidate": 0.5583333333333333,
+   "delta_pp": 9.166666666666668,
+   "discordant_base_only": 15,
+   "discordant_cand_only": 26,
+   "mcnemar_p": 0.11727520595741225,
+   "mde_pp_80pct": 12.758979360733743,
+   "verdict": "UNRESOLVABLE"
+  },
+  "judge_heldout/pku_better": {
+   "label": "judge_heldout/pku_better",
+   "n": 30,
+   "acc_baseline": 0.5,
+   "acc_candidate": 0.36666666666666664,
+   "delta_pp": -13.333333333333336,
+   "discordant_base_only": 7,
+   "discordant_cand_only": 3,
+   "mcnemar_p": 0.34375,
+   "mde_pp_80pct": 25.57485502113518,
+   "verdict": "UNRESOLVABLE"
+  },
+  "judge_heldout/shp": {
+   "label": "judge_heldout/shp",
+   "n": 60,
+   "acc_baseline": 0.4666666666666667,
+   "acc_candidate": 0.55,
+   "delta_pp": 8.333333333333337,
+   "discordant_base_only": 4,
+   "discordant_cand_only": 9,
+   "mcnemar_p": 0.266845703125,
+   "mde_pp_80pct": 18.04392165398806,
+   "verdict": "UNRESOLVABLE"
+  },
+  "judge_heldout/summarize": {
+   "label": "judge_heldout/summarize",
+   "n": 60,
+   "acc_baseline": 0.5833333333333334,
+   "acc_candidate": 0.6666666666666666,
+   "delta_pp": 8.333333333333325,
+   "discordant_base_only": 7,
+   "discordant_cand_only": 12,
+   "mcnemar_p": 0.359283447265625,
+   "mde_pp_80pct": 17.831215733823413,
+   "verdict": "UNRESOLVABLE"
+  }
+ }
+}
