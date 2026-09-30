@@ -118,7 +118,20 @@ curl -X POST localhost:8000/v1/systemone -H 'Content-Type: application/json' -d 
 
 ### Container
 
-A CPU and a CUDA image are in [PR #12](https://github.com/wfzyx/von/pull/12); once it lands: `docker run -p 8000:8000 ghcr.io/wfzyx/von:cpu`. Until then build from the `Dockerfile` on that branch.
+A CPU image (OpenVINO, `linux/amd64`) is published to GHCR on every master push:
+
+```bash
+docker run --rm -p 8000:8000 -v von-hf:/data/huggingface ghcr.io/wfzyx/von:cpu
+```
+
+Weights (~3 GB) are not baked in; they are fetched from the Hub on first start into `HF_HOME` (`/data/huggingface`), so mount a volume there. Tags: `cpu`, `latest` (same image), `<version>-cpu`, and a UTC calver. Flags after the image name go to `von serve`, so `docker run … ghcr.io/wfzyx/von:cpu --on-overflow refuse --no-chains` works as expected.
+
+The CUDA variant is built from the same `Dockerfile`, not published (the wheel set is several GB):
+
+```bash
+docker build --build-arg TORCH_BACKEND=default -t von:cuda .
+docker run --rm --gpus all -p 8000:8000 -v von-hf:/data/huggingface von:cuda
+```
 
 ## Configuration
 
@@ -131,6 +144,7 @@ A CPU and a CUDA image are in [PR #12](https://github.com/wfzyx/von/pull/12); on
 | `--chains DIR` / `VON_CHAINS_DIR` | bundled library | Chain-of-options library (below). `--no-chains` / `VON_CHAINS_DIR=off` disables it. |
 | `VON_CHAINS_MAX_CALLS` | 16 | Encoder sub-decisions a chained item may spend. |
 | `VON_CHAINS_MAX_STATE_TOKENS` | 4096 | Chains stand down on longer states (each sub-decision re-encodes the state). |
+| `HF_HOME` | `~/.cache/huggingface` (`/data/huggingface` in the image) | Where Hub weights are cached. |
 | `VON_API_KEY` | unset | Bearer token required by the server when set (client falls back to `TYPESAFE_API_KEY`). |
 | `VON_MODEL_ID` | `wfzyx/von` | Hugging Face repo or local checkpoint directory. |
 
