@@ -115,6 +115,6 @@ annotate_bars(rects2, "#c084fc")
 annotate_bars(rects3, "#94a3b8")
 
 plt.tight_layout(rect=[0, 0, 1, 0.93])
-output_path = "assets/benchmark_comparison.png"
+output_path = "docs/benchmark_comparison_v1.1.png"
 plt.savefig(output_path, dpi=300, facecolor=fig.get_facecolor(), edgecolor="none")
 print(f"Chart generated successfully: {output_path}")
