@@ -145,9 +145,12 @@ def launch(
     init_checkpoint_s3: str = "",
     independent_options: bool = False,
     base_model_id: str = "wfzyx/von",
+    base_encoder_s3: str = "",
     lr: float = 3e-5,
     watchdog_min: int = 0,
 ):
+    if init_checkpoint_s3 and base_encoder_s3:
+        raise SystemExit("--init-checkpoint-s3 and --base-encoder-s3 are exclusive: an init checkpoint carries its own encoder")
     market_str = "On-Demand (Guaranteed)" if on_demand else "Spot"
     print("================================================================")
     print(f"  VON TRAINING LAUNCHER [{market_str}]")
@@ -157,6 +160,7 @@ def launch(
     print(f"  Overlap target:   {overlap_target:.0%} gold-is-highest-overlap")
     print(f"  Synthetic rows:   {synthetic_n:,}")
     print(f"  Init checkpoint:  {init_checkpoint_s3 or '(none - fresh scoring head)'}")
+    print(f"  Base encoder:     {base_encoder_s3 or base_model_id}")
     print(f"  Independent opts: {independent_options}")
     print(f"  LR:               {lr}")
     # Full-corpus epochs measured at ~110 min on 4x T4 with 8192-token rows; budget
@@ -183,6 +187,16 @@ def launch(
             # The init checkpoint dir also carries the encoder config the model
             # needs, so point base_model_id there rather than at the Hub.
             base_model_id = "/opt/von/init_ckpt"
+        elif base_encoder_s3:
+            # A plain encoder directory (config + safetensors + tokenizer), e.g. the
+            # output of training/extract_gliclass_encoder.py. Fresh scoring head.
+            init_ckpt_block = (
+                "mkdir -p /opt/von/base_enc\n"
+                f"aws s3 sync {base_encoder_s3}/ /opt/von/base_enc/\n"
+                "echo '=== base encoder downloaded: fresh scoring head ==='"
+            )
+            init_ckpt_flag = ""
+            base_model_id = "/opt/von/base_enc"
         else:
             init_ckpt_block = "echo '=== no init checkpoint: fresh scoring head on base encoder ==='"
             init_ckpt_flag = ""
@@ -278,6 +292,8 @@ if __name__ == "__main__":
     parser.add_argument("--init-checkpoint-s3", type=str, default="",
                         help="S3 prefix of an existing full checkpoint (option_marker.pt + config) "
                              "to continue training from instead of a fresh scoring head.")
+    parser.add_argument("--base-encoder-s3", type=str, default="",
+                        help="S3 prefix of a plain encoder dir (config/safetensors/tokenizer) to start from with a fresh head")
     parser.add_argument("--independent-options", action="store_true",
                         help="train with the order-invariant independent-option attention mode")
     parser.add_argument("--lr", type=float, default=3e-5)
@@ -295,6 +311,7 @@ if __name__ == "__main__":
         overlap_target=args.overlap_target,
         synthetic_n=args.synthetic_n,
         init_checkpoint_s3=args.init_checkpoint_s3,
+        base_encoder_s3=args.base_encoder_s3,
         independent_options=args.independent_options,
         lr=args.lr,
         watchdog_min=args.watchdog_min,
