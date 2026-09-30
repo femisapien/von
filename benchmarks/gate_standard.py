@@ -81,6 +81,14 @@ def probe_rows() -> List[dict]:
     return out
 
 
+def judge_rows() -> List[dict]:
+    """Locked judge-shaped held-out set (benchmarks/data/judge_heldout.jsonl, sha 9107f051ec0de753):
+    pairwise response preference from HelpSteer3 validation + preference-test-sets summarize/shp/pku/hhh.
+    None of these splits are used by any Von training corpus."""
+    with open(os.path.join(ROOT, "benchmarks/data/judge_heldout.jsonl"), encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
 def hit(row: dict, pick) -> bool:
     exp = row["expected"]
     if row["type"] == "noul":
