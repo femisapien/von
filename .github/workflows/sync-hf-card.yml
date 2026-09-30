@@ -6,7 +6,7 @@ on:
       - master
     paths:
       - "hf/MODEL_CARD.md"
-      - "assets/**"
+      - "hf/assets/**"
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -60,16 +60,13 @@ jobs:
                   repo_type="model",
               )
 
-          # Upload benchmark image if present
-          img_path = "assets/benchmark_comparison.png"
-          if os.path.exists(img_path):
-              print(f"Uploading {img_path} to {repo_id}...")
-              api.upload_file(
-                  path_or_fileobj=img_path,
-                  path_in_repo="assets/benchmark_comparison.png",
-                  repo_id=repo_id,
-                  repo_type="model",
-              )
+          # Card figures live under hf/assets/ and are referenced relatively by the card.
+          import glob
+          for img_path in sorted(glob.glob("hf/assets/*.png")):
+              rel = os.path.relpath(img_path, "hf")
+              print(f"Uploading {img_path} -> {rel}...")
+              api.upload_file(path_or_fileobj=img_path, path_in_repo=rel,
+                              repo_id=repo_id, repo_type="model")
 
           print("Successfully synced model card and assets to Hugging Face Hub!")
           EOF
