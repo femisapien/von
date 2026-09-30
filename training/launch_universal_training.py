@@ -26,7 +26,7 @@ CANDIDATE_TYPES = [
     # A10G first: ~2x the throughput of a T4 for this workload and 24GB per GPU,
     # which makes it both faster and cheaper per epoch despite the higher rate.
     ("g5.12xlarge", "4x NVIDIA A10G 96GB, 48 vCPU (On-Demand ~$5.67/hr)"),
-    ("g4dn.12xlarge", "4x NVIDIA T4 64GB, 48 vCPU (On-Demand ~$3.91/hr)"),
+    # g4dn (16 GB T4) OOMs on ~1.2k-token judge rows at batch 8; A10G only.
     ("g5.4xlarge", "1x NVIDIA A10G 24GB, 16 vCPU (Spot ~$0.69/hr)"),
     ("g5.2xlarge", "1x NVIDIA A10G 24GB, 8 vCPU (Spot ~$0.54/hr)"),
 ]
@@ -93,6 +93,7 @@ echo "=== Building {max_train}-sample Universal Decision Corpus (long_context={l
     --synthetic_n {synthetic_n} \\
     --output_dir data_universal
 
+{extra_train_block}
 # Optional: continue from an existing full checkpoint (encoder + trained scoring
 # head) instead of a randomly-initialised head on the base encoder.
 {init_ckpt_block}
@@ -142,6 +143,7 @@ def launch(
     long_ratio: float = 0.30,
     overlap_target: float = 0.32,
     synthetic_n: int = 0,
+    extra_train_s3: str = "",
     init_checkpoint_s3: str = "",
     independent_options: bool = False,
     base_model_id: str = "wfzyx/von",
@@ -175,6 +177,19 @@ def launch(
         print("  !! WARNING: writing to the SHIPPED weights prefix.")
     print("================================================================\n")
 
+    extra_train_block = ""
+    if extra_train_s3:
+        # Extra pre-built rows (e.g. data_judge_mix) appended to the built corpus and reshuffled.
+        extra_train_block = (
+            f"aws s3 cp {extra_train_s3} /opt/von/extra_train.jsonl\n"
+            "/opt/von/.venv/bin/python - <<'PYEOF'\n"
+            "import random\n"
+            "rows = open('data_universal/train.jsonl').read().splitlines() + open('/opt/von/extra_train.jsonl').read().splitlines()\n"
+            "random.Random(0).shuffle(rows)\n"
+            "open('data_universal/train.jsonl', 'w').write('\\n'.join(rows) + '\\n')\n"
+            "print('train rows after extra:', len(rows))\n"
+            "PYEOF"
+        )
     user_data_path = "/tmp/user_data_universal.sh"
     with open(user_data_path, "w") as f:
         if init_checkpoint_s3:
@@ -208,6 +223,7 @@ def launch(
             long_ratio=long_ratio,
             overlap_target=overlap_target,
             synthetic_n=synthetic_n,
+            extra_train_block=extra_train_block,
             init_ckpt_block=init_ckpt_block,
             init_ckpt_flag=init_ckpt_flag,
             independent_options_flag="--independent_options" if independent_options else "",
@@ -287,6 +303,7 @@ if __name__ == "__main__":
     parser.add_argument("--s3-target", type=str, default=S3_TARGET,
                         help="S3 prefix for checkpoints. Defaults to the SHIPPED weights "
                              "prefix, so point experiments somewhere else.")
+    parser.add_argument("--extra-train-s3", default="", help="S3 jsonl of extra rows appended to the built corpus")
     parser.add_argument("--synthetic-n", type=int, default=0,
                         help="rows of synthetic two-hop/numeric decisions to mix in (0 = off)")
     parser.add_argument("--init-checkpoint-s3", type=str, default="",
@@ -310,6 +327,7 @@ if __name__ == "__main__":
         long_ratio=args.long_ratio,
         overlap_target=args.overlap_target,
         synthetic_n=args.synthetic_n,
+        extra_train_s3=args.extra_train_s3,
         init_checkpoint_s3=args.init_checkpoint_s3,
         base_encoder_s3=args.base_encoder_s3,
         independent_options=args.independent_options,
