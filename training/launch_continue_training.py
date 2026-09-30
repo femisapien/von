@@ -94,8 +94,8 @@ timeout {timeout_s} /opt/von/.venv/bin/torchrun --nproc_per_node=$NUM_GPUS train
     --base_model_id /opt/von/init_ckpt \\
     --init_checkpoint /opt/von/init_ckpt \\
     --epochs {epochs} \\
-    --batch_size 8 \\
-    --grad_accum_steps 2 \\
+    --batch_size {batch_size} \\
+    --grad_accum_steps {grad_accum} \\
     --lr {lr} \\
     {independent_options_flag} \\
     {digit_split_flag} \\
@@ -131,6 +131,8 @@ def launch(
     epochs: int = 1,
     independent_options: bool = False,
     digit_split: bool = False,
+    batch_size: int = 8,
+    grad_accum: int = 2,
     timeout_s: int = 2100,
     on_demand: bool = True,
 ):
@@ -163,6 +165,8 @@ def launch(
             epochs=epochs,
             independent_options_flag="--independent_options" if independent_options else "",
             digit_split_flag="--digit_split" if digit_split else "",
+            batch_size=batch_size,
+            grad_accum=grad_accum,
             timeout_s=timeout_s,
         ))
 
@@ -231,6 +235,8 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--independent-options", action="store_true")
     parser.add_argument("--digit-split", action="store_true")
+    parser.add_argument("--batch-size", type=int, default=8, help="per-GPU micro-batch (T4 16GB with long rows: 2)")
+    parser.add_argument("--grad-accum", type=int, default=2)
     parser.add_argument("--timeout-s", type=int, default=2100)
     args = parser.parse_args()
 
@@ -244,5 +250,7 @@ if __name__ == "__main__":
         epochs=args.epochs,
         independent_options=args.independent_options,
         digit_split=args.digit_split,
+        batch_size=args.batch_size,
+        grad_accum=args.grad_accum,
         timeout_s=args.timeout_s,
     )
