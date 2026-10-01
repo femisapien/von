@@ -153,7 +153,9 @@ jobs:
           for i in $(seq 1 12); do
             PY=$(curl -s https://pypi.org/pypi/von-sdk/json | python3 -c 'import json,sys;print(json.load(sys.stdin)["info"]["version"])' || true)
             NPM=$(npm view von-sdk version 2>/dev/null || true)
-            HF=$(curl -fsSL -H 'Cache-Control: no-cache' https://huggingface.co/wfzyx/von/resolve/main/README.md | grep -m1 -oE 'von-sdk>=[0-9.]+' | cut -d= -f3 || true)
+            # fetch to a file first: grep -m1 closes the pipe early, curl exits 23 and pipefail empties HF
+            curl -fsSL -H 'Cache-Control: no-cache' -o /tmp/hf_card.md https://huggingface.co/wfzyx/von/resolve/main/README.md || true
+            HF=$(grep -m1 -oE 'von-sdk>=[0-9.]+' /tmp/hf_card.md 2>/dev/null | cut -d= -f3 || true)
             echo "attempt $i: pypi=$PY npm=$NPM hf=$HF"
             [ "$PY" = "$V" ] && [ "$NPM" = "$V" ] && [ "$HF" = "$V" ] && break
             sleep 20
