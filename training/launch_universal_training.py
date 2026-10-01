@@ -152,6 +152,7 @@ def launch(
     batch_size: int = 8,
     grad_accum: int = 2,
     only_type: str = "",
+    region: str = "",
     init_checkpoint_s3: str = "",
     independent_options: bool = False,
     base_model_id: str = "wfzyx/von",
@@ -246,6 +247,21 @@ def launch(
     instance_id = None
     selected_type = None
 
+    global REGION, SUBNETS, AMI_ID
+    if region and region != REGION:
+        # Other regions: default-VPC subnets and the same-name DL base AMI resolved live.
+        REGION = region
+        SUBNETS = [(sn["SubnetId"], sn["AvailabilityZone"]) for sn in sorted(
+            run_aws(["ec2", "describe-subnets", "--filters", "Name=default-for-az,Values=true",
+                     "--query", "Subnets[].{SubnetId:SubnetId,AvailabilityZone:AvailabilityZone}"]) or [],
+            key=lambda x: x["AvailabilityZone"])]
+        imgs = run_aws(["ec2", "describe-images", "--owners", "amazon",
+                        "--filters", "Name=name,Values=Deep Learning Base AMI with Single CUDA (Ubuntu 22.04)*",
+                        "--query", "sort_by(Images,&CreationDate)[-1].ImageId"])
+        if not imgs or not SUBNETS:
+            raise RuntimeError(f"could not resolve AMI/subnets in {REGION}")
+        AMI_ID = imgs
+        print(f"  Region {REGION}: AMI {AMI_ID}, subnets {[az for _, az in SUBNETS]}")
     for itype, desc in CANDIDATE_TYPES:
         if only_type and itype not in only_type.split(","):
             continue
@@ -322,6 +338,7 @@ if __name__ == "__main__":
     parser.add_argument("--s3-target", type=str, default=S3_TARGET,
                         help="S3 prefix for checkpoints. Defaults to the SHIPPED weights "
                              "prefix, so point experiments somewhere else.")
+    parser.add_argument("--region", default="", help="launch in another region (default us-west-2); S3 stays in us-west-2")
     parser.add_argument("--only-type", default="", help="comma-separated allowed instance types, e.g. g5.12xlarge,g6.12xlarge (no single-GPU fallback)")
     parser.add_argument("--batch-size", type=int, default=8, help="per-GPU micro-batch; 4 when the corpus has ~1k-token rows")
     parser.add_argument("--grad-accum", type=int, default=2)
@@ -353,6 +370,7 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         grad_accum=args.grad_accum,
         only_type=args.only_type,
+        region=args.region,
         init_checkpoint_s3=args.init_checkpoint_s3,
         base_encoder_s3=args.base_encoder_s3,
         independent_options=args.independent_options,
