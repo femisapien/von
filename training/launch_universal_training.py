@@ -26,6 +26,10 @@ CANDIDATE_TYPES = [
     # A10G first: ~2x the throughput of a T4 for this workload and 24GB per GPU,
     # which makes it both faster and cheaper per epoch despite the higher rate.
     ("g5.12xlarge", "4x NVIDIA A10G 96GB, 48 vCPU (On-Demand ~$5.67/hr)"),
+    # Same 24 GB/GPU class, separate capacity pool; ~0.8x A10G throughput.
+    ("g6.12xlarge", "4x NVIDIA L4 96GB, 48 vCPU (On-Demand ~$4.60/hr)"),
+    # 48 GB/GPU: takes batch 8 on long rows; pricier but rarely sold out.
+    ("g6e.12xlarge", "4x NVIDIA L40S 192GB, 48 vCPU (On-Demand ~$10.50/hr)"),
     # g4dn (16 GB T4) OOMs on ~1.2k-token judge rows at batch 8; A10G only.
     ("g5.4xlarge", "1x NVIDIA A10G 24GB, 16 vCPU (Spot ~$0.69/hr)"),
     ("g5.2xlarge", "1x NVIDIA A10G 24GB, 8 vCPU (Spot ~$0.54/hr)"),
@@ -243,10 +247,16 @@ def launch(
     selected_type = None
 
     for itype, desc in CANDIDATE_TYPES:
-        if only_type and itype != only_type:
+        if only_type and itype not in only_type.split(","):
             continue
         print(f"\nEvaluating instance type: {itype} [{desc}]...")
+        offered = set(run_aws(["ec2", "describe-instance-type-offerings", "--location-type", "availability-zone",
+                               "--filters", f"Name=instance-type,Values={itype}",
+                               "--query", "InstanceTypeOfferings[].Location"]) or [])
         for subnet_id, az in SUBNETS:
+            if offered and az not in offered:
+                print(f"  -> {itype} not offered in {az}, skipping.")
+                continue
             print(f"  -> Trying {itype} in {az} ({subnet_id})...")
             try:
                 run_args = [
@@ -312,7 +322,7 @@ if __name__ == "__main__":
     parser.add_argument("--s3-target", type=str, default=S3_TARGET,
                         help="S3 prefix for checkpoints. Defaults to the SHIPPED weights "
                              "prefix, so point experiments somewhere else.")
-    parser.add_argument("--only-type", default="", help="restrict to one instance type, e.g. g5.12xlarge (no single-GPU fallback)")
+    parser.add_argument("--only-type", default="", help="comma-separated allowed instance types, e.g. g5.12xlarge,g6.12xlarge (no single-GPU fallback)")
     parser.add_argument("--batch-size", type=int, default=8, help="per-GPU micro-batch; 4 when the corpus has ~1k-token rows")
     parser.add_argument("--grad-accum", type=int, default=2)
     parser.add_argument("--extra-train-s3", default="", help="S3 jsonl of extra rows appended to the built corpus")
