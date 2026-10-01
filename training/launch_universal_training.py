@@ -53,7 +53,8 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # run's own epoch estimate (see launch()), not a fixed number: a 240-minute
 # ceiling killed a 2-epoch full-corpus run 23 minutes before it finished.
 shutdown -c 2>/dev/null || true
-shutdown -h +{watchdog_min} &
+# Timer-driven shutdown skips the EXIT trap, so the watchdog ships the log itself.
+( sleep {watchdog_min}m; echo "=== WATCHDOG {watchdog_min}m: halting ==="; aws s3 cp /var/log/user-data.log {s3_target}/run.log || true; shutdown -h now ) &
 
 echo "=== [VON UNIVERSAL DECISION TRAINING START] ==="
 export DEBIAN_FRONTEND=noninteractive
@@ -146,6 +147,7 @@ def launch(
     extra_train_s3: str = "",
     batch_size: int = 8,
     grad_accum: int = 2,
+    only_type: str = "",
     init_checkpoint_s3: str = "",
     independent_options: bool = False,
     base_model_id: str = "wfzyx/von",
@@ -241,6 +243,8 @@ def launch(
     selected_type = None
 
     for itype, desc in CANDIDATE_TYPES:
+        if only_type and itype != only_type:
+            continue
         print(f"\nEvaluating instance type: {itype} [{desc}]...")
         for subnet_id, az in SUBNETS:
             print(f"  -> Trying {itype} in {az} ({subnet_id})...")
@@ -308,6 +312,7 @@ if __name__ == "__main__":
     parser.add_argument("--s3-target", type=str, default=S3_TARGET,
                         help="S3 prefix for checkpoints. Defaults to the SHIPPED weights "
                              "prefix, so point experiments somewhere else.")
+    parser.add_argument("--only-type", default="", help="restrict to one instance type, e.g. g5.12xlarge (no single-GPU fallback)")
     parser.add_argument("--batch-size", type=int, default=8, help="per-GPU micro-batch; 4 when the corpus has ~1k-token rows")
     parser.add_argument("--grad-accum", type=int, default=2)
     parser.add_argument("--extra-train-s3", default="", help="S3 jsonl of extra rows appended to the built corpus")
@@ -337,6 +342,7 @@ if __name__ == "__main__":
         extra_train_s3=args.extra_train_s3,
         batch_size=args.batch_size,
         grad_accum=args.grad_accum,
+        only_type=args.only_type,
         init_checkpoint_s3=args.init_checkpoint_s3,
         base_encoder_s3=args.base_encoder_s3,
         independent_options=args.independent_options,
