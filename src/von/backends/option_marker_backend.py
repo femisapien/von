@@ -747,6 +747,7 @@ class OptionMarkerBackend(BaseBackend):
         return self._commit_noul(NoulAnswer(noul=prob_true))
 
     def _commit_noul(self, ans: NoulAnswer) -> NoulAnswer:
+        ans.noul_raw = round(float(ans.noul), 4)
         if self.noul_decision == "raw":
             return ans
         ans.noul = round(_noul_decide(float(ans.noul), self.noul_band_edge, self.noul_band_slope), 4)

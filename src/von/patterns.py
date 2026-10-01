@@ -29,9 +29,12 @@ def confidence_gate(
     escalate = {}
 
     for q_id, ans in resp.answers.items():
-        # Noul answers carry no confidence field; use distance from uncertainty (0.5).
+        # Noul answers carry no confidence field; use distance from uncertainty (0.5)
+        # on the pre-band probability. The committed `noul` sits in a fixed band
+        # ([0.8,0.85] / [0.15,0.2]) so its distance from 0.5 is ~constant and useless.
         if isinstance(ans, NoulAnswer):
-            conf = abs(ans.noul - 0.5) * 2.0
+            p = ans.noul_raw if ans.noul_raw is not None else ans.noul
+            conf = abs(p - 0.5) * 2.0
         else:
             conf = ans.confidence
 

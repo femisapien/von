@@ -118,6 +118,27 @@ def test_confidence_gate_routes_nouls_by_distance_from_half(monkeypatch):
     assert set(gated["escalate"]) == {"unsure"}
 
 
+def test_confidence_gate_uses_pre_band_probability(monkeypatch):
+    """Under the band rule every committed `noul` lands in [0.8,0.85] or [0.15,0.2],
+    so |noul-0.5|*2 is ~0.6-0.7 for every answer and a 0.8 gate escalates all of them.
+    The gate must read `noul_raw` when present."""
+    from von import patterns
+    from von.backends.option_marker_backend import _noul_decide
+    from von.types import NoulAnswer, SystemOneResponse, Usage
+
+    def banded(p: float) -> NoulAnswer:
+        return NoulAnswer(noul=_noul_decide(p, 0.8, 0.1), noul_raw=p)
+
+    answers = {"sure_yes": banded(0.97), "sure_no": banded(0.03), "unsure": banded(0.55)}
+    assert all(0.6 <= abs(a.noul - 0.5) * 2 <= 0.7 for a in answers.values())
+    fake = SystemOneResponse(model="fake", answers=answers, usage=Usage())
+    monkeypatch.setattr(patterns, "system_one", lambda state, questions: fake)
+
+    gated = confidence_gate("state", {}, threshold=0.8)
+    assert set(gated["automatic"]) == {"sure_yes", "sure_no"}
+    assert set(gated["escalate"]) == {"unsure"}
+
+
 def test_patterns_composite_score():
     state = "Catastrophic multi-region outage affecting all enterprise payments and databases."
     questions = {

@@ -32,6 +32,8 @@ export type Question = NoulQuestion | ChoiceQuestion | ScoreQuestion;
 export interface NoulAnswer {
   type: "noul";
   noul: number;
+  /** Calibrated P(true) before the band decision rule; gate on this, not on `noul`. */
+  noul_raw?: number;
 }
 
 export interface ChoiceAnswer {

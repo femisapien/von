@@ -132,6 +132,11 @@ class NoulAnswer(BaseModel):
     model_config = ConfigDict(extra="ignore")
     type: Literal["noul"] = "noul"
     noul: float = Field(..., description="Probability between 0.0 and 1.0 that the condition is true")
+    noul_raw: Optional[float] = Field(
+        None,
+        description="Calibrated P(true) before the band decision rule. Use this for confidence gating; "
+                    "`noul` is the committed decision and sits in [0.8,0.85] or [0.15,0.2] under the band rule.",
+    )
 
 
 class ChoiceAnswer(BaseModel):

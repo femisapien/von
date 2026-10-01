@@ -68,6 +68,8 @@ TypeScript mirrors the same API (`decide`, `judge`, `rate`, `systemOne`).
 
 Two rules that save you a bad afternoon: `judge` **without** `criteria` is the weakest path (generic "holds / is false" descriptions, surface cues win) — pass `criteria` or phrase it as a described 3-way Choice. And Von is **English only**; other languages get token matching with confidence it has not earned.
 
+**Acting on confidence.** `von.patterns.confidence_gate(state, questions, threshold=0.80)` splits answers into `automatic` / `escalate`. The 0.80 default is measured, not guessed (`benchmarks/sweep_threshold.py`, held-out jabr v2 + coding-agent probes, Von 1.2 weights): Choice at ≥0.80 keeps 25% of items at **92.4%** accuracy (90% lower bound 89.4%, n=702; the rest sit at 59%); Noul keeps 16% at 83% (gated on `noul_raw`, the pre-band probability — the committed `noul` sits in a fixed band and carries no gate signal). Lowest cutoff that clears 90% kept-accuracy with 90% confidence: 0.82. In a cascade with Qwen3.5-4B on JevBench public, Von-first matches the 4B alone from 0.75 up (cost lever, not an accuracy lever). Out of domain the ranking itself breaks (judge pairs, agent-shadow probes: kept-accuracy flat at any cutoff) — a threshold cannot rescue that, only labels and a refit can. Full curves: `results/threshold_sweep_*.json`.
+
 ## Wire protocol
 
 `von serve` exposes `/v1/systemone`, byte-compatible with the TypeSafe specification. Anything that talks to Jev talks to Von by changing the base URL; the SDKs do the same via `VON_BASE_URL`.
