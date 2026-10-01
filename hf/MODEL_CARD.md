@@ -30,7 +30,7 @@ examples are in the repo: https://github.com/wfzyx/von
 - **Weights SHA:** `5df8185a4f2327ad0a7cd117cc4f701ac557b9ae`
 
 ```bash
-pip install "von-sdk>=1.3.5"
+pip install "von-sdk>=1.3.6"
 ```
 
 > Previously published as `wfzyx/von-1.0`; the old id redirects.
