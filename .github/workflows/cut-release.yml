@@ -155,7 +155,8 @@ jobs:
             NPM=$(npm view von-sdk version 2>/dev/null || true)
             # fetch to a file first: grep -m1 closes the pipe early, curl exits 23 and pipefail empties HF
             curl -fsSL -H 'Cache-Control: no-cache' -o /tmp/hf_card.md https://huggingface.co/wfzyx/von/resolve/main/README.md || true
-            HF=$(grep -m1 -oE 'von-sdk>=[0-9.]+' /tmp/hf_card.md 2>/dev/null | cut -d= -f3 || true)
+            # 'von-sdk>=1.3.7' has one '=', so the version is field 2 of cut -d=; use sed instead of counting fields
+            HF=$(sed -nE 's/.*von-sdk>=([0-9.]+).*/\1/p' /tmp/hf_card.md 2>/dev/null | head -1 || true)
             echo "attempt $i: pypi=$PY npm=$NPM hf=$HF"
             [ "$PY" = "$V" ] && [ "$NPM" = "$V" ] && [ "$HF" = "$V" ] && break
             sleep 20
