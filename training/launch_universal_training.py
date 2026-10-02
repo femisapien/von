@@ -67,7 +67,7 @@ echo "Detected $NUM_GPUS GPUs. Starting decoder+head DDP training..."
     --base_model_id {base_model_id} \\
     --epochs {epochs} \\
     --lr {lr} \\
-    --batch_size {batch_size} \\
+    --batch_size {batch_size} --max_tokens {max_tokens} \\
     --grad_accum_steps {grad_accum} \\
     --max_length {max_length} \\
     --lora_r {lora_r} --lora_alpha {lora_alpha} \\
@@ -264,7 +264,7 @@ def launch(
             init_ckpt_flag = ""
         if trainer == "decoder":
             d = dict(max_length=4096, lora_r=64, lora_alpha=128, head_width=512, head_routing_layers=1, head_layers=2,
-                     head_heads=8, head_feedforward=2048, eval_name="von-2-nano", gradient_checkpointing=0)
+                     head_heads=8, head_feedforward=2048, eval_name="von-2-nano", gradient_checkpointing=0, max_tokens=10240)
             d.update(decoder_opts or {})
             # Measured on 4x L4: checkpointing + batch 4 + reference causal_conv1d = 5.7 rows/s (14 h for 290k).
             # Memory was 6.7/24 GB, so default to no recompute; the box builds the causal_conv1d CUDA kernel.

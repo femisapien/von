@@ -70,8 +70,14 @@ def estimate_tokens(row: dict) -> int:
     return 64 + n // 4
 
 
-def make_batches(rows: List[dict], batch_size: int, seed: int, world: int, rank: int) -> List[List[int]]:
-    """Length-bucketed batches, sharded by rank. Shuffle globally, sort inside mega-chunks, shuffle batch order."""
+def make_batches(rows: List[dict], batch_size: int, seed: int, world: int, rank: int, max_tokens: int = 0,
+                 max_length: int = 4096) -> List[List[int]]:
+    """Length-bucketed, token-budgeted batches, sharded by rank.
+
+    Shuffle globally, sort inside mega-chunks, then fill each batch until it holds ``batch_size`` rows or
+    ``rows * longest_row_tokens`` would exceed ``max_tokens`` (padded cost). A fixed row count OOMs on a
+    bucket of long rows and starves the GPU on short ones; the budget keeps the padded token count flat.
+    """
     rng = random.Random(seed)
     order = list(range(len(rows)))
     rng.shuffle(order)
@@ -79,21 +85,39 @@ def make_batches(rows: List[dict], batch_size: int, seed: int, world: int, rank:
     batches: List[List[int]] = []
     for start in range(0, len(order), chunk):
         piece = sorted(order[start:start + chunk], key=lambda i: estimate_tokens(rows[i]))
-        batches.extend(piece[j:j + batch_size] for j in range(0, len(piece), batch_size))
+        cur: List[int] = []
+        for i in piece:
+            longest = min(max_length, estimate_tokens(rows[i]))  # sorted ascending, so i is the longest so far
+            if cur and (len(cur) >= batch_size or (max_tokens and (len(cur) + 1) * longest > max_tokens)):
+                batches.append(cur)
+                cur = []
+            cur.append(i)
+        if cur:
+            batches.append(cur)
     rng.shuffle(batches)
     usable = (len(batches) // world) * world  # every rank sees the same number of steps
     return batches[rank:usable:world]
 
 
-def encode_batch(tokenizer: Any, rows: List[dict], max_length: int, device: torch.device) -> Tuple[Dict[str, Any], List[int], List[Optional[List[float]]]]:
+SKIPPED_ROWS = 0  # rows whose schema alone exceeds max_length (options too long to pack); counted, not fatal
+
+
+def encode_batch(tokenizer: Any, rows: List[dict], max_length: int, device: torch.device) -> Tuple[Optional[Dict[str, Any]], List[int], List[Optional[List[float]]]]:
+    global SKIPPED_ROWS
     records, targets, softs = [], [], []
     for row in rows:
         record, target = row_to_record(row)
-        enc = encode_record(tokenizer, record, max_length=max_length)
+        try:
+            enc = encode_record(tokenizer, record, max_length=max_length)
+        except ValueError:
+            SKIPPED_ROWS += 1
+            continue
         q = enc.questions[0]
         records.append(enc)
         targets.append(q.option_ids.index(target))
         softs.append(soft_target_for(row, q.option_ids))
+    if not records:
+        return None, targets, softs
     return collate_records(records, tokenizer.pad_token_id, device), targets, softs
 
 
@@ -164,15 +188,17 @@ def s3_sync(local: str, target: str) -> None:
 
 @torch.no_grad()
 def evaluate(model: DecoderHeadModel, tokenizer: Any, rows: List[dict], batch_size: int, max_length: int,
-             device: torch.device, world: int, rank: int) -> Dict[str, Any]:
+             device: torch.device, world: int, rank: int, max_tokens: int = 0) -> Dict[str, Any]:
     model.eval()
     mine = rows[rank::world]
     correct = torch.zeros(3, device=device)
     total = torch.zeros(3, device=device)
     nll = torch.zeros((), device=device)
-    for start in range(0, len(mine), batch_size):
-        chunk = mine[start:start + batch_size]
+    for idx in make_batches(mine, batch_size, 0, 1, 0, max_tokens, max_length):
+        chunk = [mine[i] for i in idx]
         batch, targets, _ = encode_batch(tokenizer, chunk, max_length, device)
+        if batch is None:
+            continue
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"):
             outs = model(batch)
         for rec, logits, target in zip(batch["records"], outs, targets):
@@ -201,7 +227,8 @@ def main() -> None:
     ap.add_argument("--max_steps", type=int, default=0, help="optimizer steps; 0 = epochs")
     ap.add_argument("--max_train", type=int, default=0)
     ap.add_argument("--max_val", type=int, default=3000)
-    ap.add_argument("--batch_size", type=int, default=4)
+    ap.add_argument("--batch_size", type=int, default=16, help="max rows per micro-batch")
+    ap.add_argument("--max_tokens", type=int, default=10240, help="max padded tokens per micro-batch (rows x longest); 0 = rows only")
     ap.add_argument("--grad_accum_steps", type=int, default=4)
     ap.add_argument("--max_length", type=int, default=4096)
     ap.add_argument("--lr", type=float, default=2e-4, help="LoRA learning rate")
@@ -258,25 +285,31 @@ def main() -> None:
     opt = torch.optim.AdamW([{"params": lora_params, "lr": a.lr}, {"params": head_params, "lr": a.head_lr}],
                             weight_decay=a.weight_decay, betas=(0.9, 0.98))
 
-    epoch_batches = len(make_batches(train_rows, a.batch_size, a.seed, world, rank))
+    epoch_batches = len(make_batches(train_rows, a.batch_size, a.seed, world, rank, a.max_tokens, a.max_length))
     total_steps = a.max_steps or max(1, int(math.ceil(epoch_batches * a.epochs / a.grad_accum_steps)))
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / max(1, a.warmup_steps)) * max(0.05, 1.0 - s / max(1, total_steps)))
     log(f"steps: {total_steps} optimizer steps ({epoch_batches} micro-batches/epoch/rank, accum {a.grad_accum_steps})")
 
-    step, micro, seen, run_loss, run_correct, run_n = 0, 0, 0, 0.0, 0, 0
+    step, micro, seen, run_loss, run_correct, run_n, run_batches = 0, 0, 0, 0.0, 0, 0, 0
     t0 = time.time()
     model.train()
     epoch = 0
     done = False
     while not done:
-        for idx in make_batches(train_rows, a.batch_size, a.seed + epoch, world, rank):
+        for idx in make_batches(train_rows, a.batch_size, a.seed + epoch, world, rank, a.max_tokens, a.max_length):
             rows = [train_rows[i] for i in idx]
             batch, targets, softs = encode_batch(tokenizer, rows, a.max_length, device)
+            if batch is None:
+                # DDP needs every rank to step together; feed a zero contribution instead of skipping.
+                batch, targets, softs = encode_batch(tokenizer, [train_rows[0]], a.max_length, device)
+                if batch is None:
+                    raise ValueError("train_rows[0] does not pack; pick a corpus whose first row fits --max_length")
+                targets = targets[:1]; softs = [None]
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"):
                 outs = ddp_model(batch)
             loss, correct = decision_loss([o[0] for o in outs], targets, softs, a.brier_weight, a.label_smoothing)
             (loss / a.grad_accum_steps).backward()
-            run_loss += loss.item(); run_correct += correct; run_n += len(rows); seen += len(rows)
+            run_loss += loss.item(); run_correct += correct; run_n += len(rows); seen += len(rows); run_batches += 1
             micro += 1
             if micro % a.grad_accum_steps:
                 continue
@@ -285,11 +318,13 @@ def main() -> None:
             step += 1
             if step % 50 == 0 or step == 1:
                 el = time.time() - t0
-                log(f"step {step}/{total_steps} loss {run_loss / max(1, run_n / a.batch_size):.4f} "
+                log(f"step {step}/{total_steps} loss {run_loss / max(1, run_batches):.4f} "
                     f"acc {run_correct/max(1,run_n):.3f} lr {sched.get_last_lr()[0]:.2e} {seen*world/el:.1f} rows/s eta {el/step*(total_steps-step)/60:.0f}min")
-                run_loss, run_correct, run_n = 0.0, 0, 0
+                if SKIPPED_ROWS:
+                    log(f"  skipped so far (schema > max_length): {SKIPPED_ROWS}")
+                run_loss, run_correct, run_n, run_batches = 0.0, 0, 0, 0
             if val_rows and step % a.val_every == 0:
-                log(f"val @ {step}: {json.dumps(evaluate(model, tokenizer, val_rows, a.batch_size, a.max_length, device, world, rank))}")
+                log(f"val @ {step}: {json.dumps(evaluate(model, tokenizer, val_rows, a.batch_size, a.max_length, device, world, rank, a.max_tokens))}")
             if rank == 0 and step % a.save_every == 0:
                 save_checkpoint(model, tokenizer, a.output_dir, a.base_model_id, a.max_length, {"step": step, "args": vars(a)})
                 s3_sync(a.output_dir, a.s3_target)
@@ -298,7 +333,7 @@ def main() -> None:
                 break
         epoch += 1
 
-    final = evaluate(model, tokenizer, val_rows, a.batch_size, a.max_length, device, world, rank) if val_rows else {}
+    final = evaluate(model, tokenizer, val_rows, a.batch_size, a.max_length, device, world, rank, a.max_tokens) if val_rows else {}
     log(f"final val: {json.dumps(final)}")
     if rank == 0:
         save_checkpoint(model, tokenizer, a.output_dir, a.base_model_id, a.max_length, {"step": step, "args": vars(a), "val": final})
