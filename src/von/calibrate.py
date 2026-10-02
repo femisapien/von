@@ -299,6 +299,11 @@ def write_calibration(out_path: str, checkpoint: str, fitted: Dict[str, Any], la
                                      f"{fitted['report']['folds']}-fold CV chose {fitted['report']['winner']}")
     base["calibration_report"] = fitted["report"]
     base["calibration_timestamp"] = time.time()
+    # model_id in the shipped file names the weights (von-1.2.0, unchanged since);
+    # record the engine that fitted this map separately so the two stop being confused.
+    from von import __version__ as _engine_version
+    base["calibrated_with_engine"] = f"von-sdk {_engine_version}"
+    base.setdefault("weights_id", base.get("model_id"))
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     if os.path.islink(out_path):
         # Writing through a link would silently overwrite the shipped file it

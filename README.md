@@ -15,7 +15,7 @@
 
 Von answers three question types over any JSON or text *state* without generating tokens: **Choice** (pick one of K described options, with a probability over all of them), **Noul** (probability that a condition holds) and **Score** (calibrated position on an ordinal scale). It is a drop-in server and client for the TypeSafe `/v1/systemone` wire protocol, ships as `von-sdk` for Python and TypeScript, and runs on CPU (OpenVINO), CUDA, ROCm and Apple MPS.
 
-Weights, training data, calibration and the full benchmark record live on the [model card](https://huggingface.co/wfzyx/von). This README is about using it.
+Weights, training data, calibration and the full benchmark record live on the [model card](https://huggingface.co/wfzyx/von). Training on your own labels, or on another encoder (German, smaller): [docs/finetune.md](docs/finetune.md). This README is about using it.
 
 ## Install
 
@@ -106,6 +106,8 @@ Response extras beyond the spec, all optional for clients: `usage.input_tokens` 
 | `VON_CHAINS_MAX_CALLS` | 16 | Encoder sub-decisions a chained item may spend. |
 | `VON_CHAINS_MAX_STATE_TOKENS` | 4096 | Chains stand down on longer states. |
 | `VON_MODEL_ID` | `wfzyx/von` | Hub repo or local checkpoint directory. |
+| `VON_CHECKPOINT_DIR` | — | Absolute path to a local checkpoint (`option_marker.pt` + `marker_calibration.json`). Set this from hooks/cron: the relative default `checkpoints/von-1.2` depends on the working directory. |
+| `VON_CALIBRATION` | — | Pin a specific `marker_calibration.json` (e.g. one written by `von calibrate`). Without a local checkpoint, `calibrate` writes to `~/.cache/von/marker_calibration.json` and serve picks it up from there. |
 | `HF_HOME` | `~/.cache/huggingface` (`/data/huggingface` in the image) | Weight cache. |
 
 Container tags: `cpu` / `latest` (OpenVINO, `linux/amd64`), `<version>-cpu`, a UTC calver. Flags after the image name go to `von serve`. A CUDA image builds from the same `Dockerfile` with `--build-arg TORCH_BACKEND=default` (not published; the wheel set is several GB).

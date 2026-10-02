@@ -264,7 +264,14 @@ def calibrate(labels: str, out: Optional[str], checkpoint: Optional[str], device
     if checkpoint is None:
         checkpoint = OptionMarkerBackend(device=device).checkpoint_dir
     if out is None:
-        out = os.path.join(checkpoint, "marker_calibration.json")
+        if os.path.exists(os.path.join(checkpoint, "option_marker.pt")):
+            out = os.path.join(checkpoint, "marker_calibration.json")
+        else:
+            # Weights come from the Hub: write somewhere absolute that the backend
+            # checks regardless of the working directory it is started from.
+            from von.backends.option_marker_backend import user_calibration_path
+            out = user_calibration_path()
+    out = os.path.abspath(os.path.expanduser(out))
     try:
         written = run(labels, out, checkpoint, device=device, folds=folds, seed=seed, log=lambda m: click.echo(m, err=True))
     except ValueError as exc:
@@ -272,6 +279,7 @@ def calibrate(labels: str, out: Optional[str], checkpoint: Optional[str], device
         sys.exit(1)
     click.echo(json.dumps({"out": out, "calibration_map": written["calibration_map"],
                            "report": written["calibration_report"]}, indent=2))
+    click.echo(f"[von] serve will load this map from {out}; to pin it explicitly: export VON_CALIBRATION={out}", err=True)
 
 
 if __name__ == "__main__":

@@ -67,6 +67,12 @@ def _format_state(state: Any) -> str:
 # id, so pinned installs keep resolving.
 VON_HF_REPO = "wfzyx/von"
 
+def user_calibration_path() -> str:
+    """Absolute, CWD-independent location for a user-fitted marker_calibration.json."""
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "von", "marker_calibration.json")
+
+
 VON_MODEL_ID = "von-1.3.0"
 
 
@@ -343,12 +349,15 @@ class OptionMarkerBackend(BaseBackend):
         device: Optional[str] = None,
     ):
         if checkpoint_dir is None:
-            checkpoint_dir = next(
+            checkpoint_dir = os.environ.get("VON_CHECKPOINT_DIR") or next(
                 (d for d in self.DEFAULT_CHECKPOINT_DIRS
                  if os.path.exists(os.path.join(d, "option_marker.pt"))),
                 self.DEFAULT_CHECKPOINT_DIRS[0],
             )
-        self.checkpoint_dir = checkpoint_dir
+        # DEFAULT_CHECKPOINT_DIRS are relative; a process started from another
+        # working directory (an editor hook, a cron job) would otherwise look in
+        # the wrong place and silently fall back to the Hub weights + shipped map.
+        self.checkpoint_dir = os.path.abspath(os.path.expanduser(checkpoint_dir))
         self.raw_device = device
         resolved = _detect_device(device)
         self.resolved_device = resolved
@@ -564,7 +573,12 @@ class OptionMarkerBackend(BaseBackend):
 
                 # Load fitted temperature if present: prefer local calibration file, fall back
                 # to the one fetched alongside the weights from the Hub.
-                calib_path = os.path.join(self.checkpoint_dir, "marker_calibration.json")
+                # Precedence: VON_CALIBRATION > <checkpoint>/marker_calibration.json
+                # > user cache (where `von calibrate` writes when there is no local
+                # checkpoint) > the file fetched alongside the Hub weights.
+                calib_path = os.environ.get("VON_CALIBRATION") or os.path.join(self.checkpoint_dir, "marker_calibration.json")
+                if not os.path.exists(calib_path) and os.path.exists(user_calibration_path()):
+                    calib_path = user_calibration_path()
                 if not os.path.exists(calib_path) and hub_calib_path:
                     calib_path = hub_calib_path
                 if os.path.exists(calib_path):
