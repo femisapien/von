@@ -191,6 +191,7 @@ def launch(
     watchdog_min: int = 0,
     trainer: str = "marker",
     decoder_opts: dict | None = None,
+    extra_rows: int = 0,
 ):
     if trainer not in ("marker", "decoder"):
         raise SystemExit(f"--trainer must be marker or decoder, got {trainer!r}")
@@ -214,7 +215,12 @@ def launch(
     # Full-corpus epochs measured at ~110 min on 4x T4 with 8192-token rows; budget
     # 130 min/epoch plus 40 min for corpus build + sync, unless overridden.
     if watchdog_min <= 0:
-        watchdog_min = 40 + 130 * epochs
+        if trainer == "decoder":
+            # Measured on 4x A10G: 18.6 rows/s on the universal corpus, 11 rows/s once judge/RAGTruth-length rows
+            # are mixed in. Budget the slow rate over every row the run will see, plus setup and eval.
+            watchdog_min = 40 + int(epochs * (max_train + long_context + synthetic_n + extra_rows) / 11 / 60) + 30
+        else:
+            watchdog_min = 40 + 130 * epochs
     print(f"  Watchdog:         {watchdog_min} min")
     print("  Cluster Target:   4x GPU (g4dn.12xlarge / g5.12xlarge)")
     print("  Region:           us-west-2")
@@ -409,6 +415,7 @@ if __name__ == "__main__":
     parser.add_argument("--base-model-id", default="", help="Hub id of the backbone (decoder trainer); default Qwen/Qwen3.5-0.8B")
     parser.add_argument("--decoder-opt", action="append", default=[],
                         help="decoder trainer knob as key=value: max_length, lora_r, lora_alpha, head_width, head_routing_layers, head_layers, head_heads, head_feedforward, eval_name")
+    parser.add_argument("--extra-rows", type=int, default=0, help="row count of --extra-train-s3, for the watchdog estimate")
     parser.add_argument("--watchdog-min", type=int, default=0,
                         help="hard shutdown ceiling in minutes (0 = derive from epochs)")
     args = parser.parse_args()
@@ -433,6 +440,7 @@ if __name__ == "__main__":
         lr=args.lr,
         watchdog_min=args.watchdog_min,
         trainer=args.trainer,
+        extra_rows=args.extra_rows,
         base_model_id=args.base_model_id or ("Qwen/Qwen3.5-0.8B" if args.trainer == "decoder" else "wfzyx/von"),
         decoder_opts={k: (int(v) if v.isdigit() else v) for k, v in (o.split("=", 1) for o in args.decoder_opt)},
     )
