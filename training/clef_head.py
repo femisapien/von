@@ -203,8 +203,14 @@ def soft_target_for(row: Dict[str, Any], option_ids: Sequence[str]) -> Optional[
     return [by_id.get(oid, 0.0) for oid in option_ids]
 
 
-def collate_records(records: List[EncodedRecord], pad_token_id: int, device: torch.device) -> Dict[str, Any]:
+def collate_records(records: List[EncodedRecord], pad_token_id: int, device: torch.device, pad_to: int = 1) -> Dict[str, Any]:
+    """Right-pad to the longest record, rounded up to a multiple of ``pad_to``.
+
+    Triton kernels (flash-linear-attention) autotune per input shape; a unique padded length every
+    step re-tunes every step. Rounding to 512 keeps the shape set small so tuning amortises.
+    """
     maximum = max(len(r.input_ids) for r in records)
+    maximum = ((maximum + pad_to - 1) // pad_to) * pad_to
     input_ids = torch.full((len(records), maximum), pad_token_id, dtype=torch.long, device=device)
     attention_mask = torch.zeros((len(records), maximum), dtype=torch.long, device=device)
     for i, r in enumerate(records):

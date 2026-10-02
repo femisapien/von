@@ -264,10 +264,11 @@ def launch(
             init_ckpt_flag = ""
         if trainer == "decoder":
             d = dict(max_length=4096, lora_r=64, lora_alpha=128, head_width=512, head_routing_layers=1, head_layers=2,
-                     head_heads=8, head_feedforward=2048, eval_name="von-2-nano", gradient_checkpointing=0, max_tokens=10240)
+                     head_heads=8, head_feedforward=2048, eval_name="von-2-nano", gradient_checkpointing=1, max_tokens=16384)
             d.update(decoder_opts or {})
-            # Measured on 4x L4: checkpointing + batch 4 + reference causal_conv1d = 5.7 rows/s (14 h for 290k).
-            # Memory was 6.7/24 GB, so default to no recompute; the box builds the causal_conv1d CUDA kernel.
+            # Measured on 24 GB GPUs: checkpointing + 4x4096-token batches = 6.7 GB and stable; without
+            # checkpointing both a 32k-token bucket and a 10k-token budget OOM'd in the deltanet backward.
+            # So: checkpointing on, 16k padded-token budget, shapes bucketed for Triton autotune.
             d["gc_flag"] = "--gradient_checkpointing" if int(d.pop("gradient_checkpointing")) else ""
             train_block = DECODER_TRAIN_BLOCK.format(base_model_id=base_model_id, epochs=epochs, lr=lr, batch_size=batch_size,
                                                      grad_accum=grad_accum, s3_target=s3_target, **d)

@@ -89,8 +89,10 @@ def make_batches(rows: List[dict], batch_size: int, seed: int, world: int, rank:
         for i in piece:
             longest = min(max_length, estimate_tokens(rows[i]))  # sorted ascending, so i is the longest so far
             if cur and (len(cur) >= batch_size or (max_tokens and (len(cur) + 1) * longest > max_tokens)):
-                batches.append(cur)
-                cur = []
+                # Close at a power-of-two row count so (rows, padded_len) shapes repeat for Triton autotune.
+                keep = 1 << (len(cur).bit_length() - 1)
+                batches.append(cur[:keep])
+                cur = cur[keep:]
             cur.append(i)
         if cur:
             batches.append(cur)
@@ -100,6 +102,7 @@ def make_batches(rows: List[dict], batch_size: int, seed: int, world: int, rank:
 
 
 SKIPPED_ROWS = 0  # rows whose schema alone exceeds max_length (options too long to pack); counted, not fatal
+PAD_TO = 512  # padded length granularity; see clef_head.collate_records
 
 
 def encode_batch(tokenizer: Any, rows: List[dict], max_length: int, device: torch.device) -> Tuple[Optional[Dict[str, Any]], List[int], List[Optional[List[float]]]]:
@@ -118,7 +121,7 @@ def encode_batch(tokenizer: Any, rows: List[dict], max_length: int, device: torc
         softs.append(soft_target_for(row, q.option_ids))
     if not records:
         return None, targets, softs
-    return collate_records(records, tokenizer.pad_token_id, device), targets, softs
+    return collate_records(records, tokenizer.pad_token_id, device, pad_to=PAD_TO), targets, softs
 
 
 def decision_loss(logits_per_row: List[torch.Tensor], targets: List[int], softs: List[Optional[List[float]]],
@@ -228,7 +231,7 @@ def main() -> None:
     ap.add_argument("--max_train", type=int, default=0)
     ap.add_argument("--max_val", type=int, default=3000)
     ap.add_argument("--batch_size", type=int, default=16, help="max rows per micro-batch")
-    ap.add_argument("--max_tokens", type=int, default=10240, help="max padded tokens per micro-batch (rows x longest); 0 = rows only")
+    ap.add_argument("--max_tokens", type=int, default=16384, help="max padded tokens per micro-batch (rows x longest); 0 = rows only")
     ap.add_argument("--grad_accum_steps", type=int, default=4)
     ap.add_argument("--max_length", type=int, default=4096)
     ap.add_argument("--lr", type=float, default=2e-4, help="LoRA learning rate")
@@ -281,7 +284,7 @@ def main() -> None:
 
     ddp_model: Any = model
     if distributed:
-        ddp_model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], find_unused_parameters=True)
+        ddp_model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], find_unused_parameters=False)
     opt = torch.optim.AdamW([{"params": lora_params, "lr": a.lr}, {"params": head_params, "lr": a.head_lr}],
                             weight_decay=a.weight_decay, betas=(0.9, 0.98))
 
