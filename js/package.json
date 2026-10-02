@@ -1,6 +1,6 @@
 {
   "name": "von-sdk",
-  "version": "1.3.6",
+  "version": "1.3.7",
   "description": "Official TypeScript/JavaScript SDK for Von - The Open-Source System One Decision Model",
   "author": "Victor Hugo <victor.panisa@gmail.com>",
   "license": "Apache-2.0",
