@@ -37,6 +37,55 @@ CANDIDATE_TYPES = [
 IAM_PROFILE = "AmazonSSMRoleForInstancesQuickSetup"
 S3_TARGET = "s3://model-weight/von-option-marker-universal"
 
+MARKER_TRAIN_BLOCK = """# Detect GPUs and train with DDP
+NUM_GPUS=$(nvidia-smi -L | wc -l)
+echo "Detected $NUM_GPUS GPUs. Starting PyTorch DDP training with 8,192 Context Window..."
+
+/opt/von/.venv/bin/torchrun --nproc_per_node=$NUM_GPUS training/train_option_marker.py \\
+    --train_data data_universal/train.jsonl \\
+    --val_data data_universal/val.jsonl \\
+    --base_model_id {base_model_id} \\
+    {init_ckpt_flag} \\
+    {independent_options_flag} \\
+    --epochs {epochs} \\
+    --lr {lr} \\
+    --batch_size {batch_size} \\
+    --grad_accum_steps {grad_accum} \\
+    --max_position_embeddings 8192 \\
+    --long_ratio {long_ratio} \\
+    --s3_target {s3_target} \\
+    --output_dir checkpoints/von-long-context
+
+"""
+
+DECODER_TRAIN_BLOCK = """# Decoder variant: Qwen3.5-0.8B + LoRA + JointSchemaHead (training/train_decoder_head.py)
+NUM_GPUS=$(nvidia-smi -L | wc -l)
+echo "Detected $NUM_GPUS GPUs. Starting decoder+head DDP training..."
+/opt/von/.venv/bin/torchrun --nproc_per_node=$NUM_GPUS training/train_decoder_head.py \\
+    --train_data data_universal/train.jsonl \\
+    --val_data data_universal/val.jsonl \\
+    --base_model_id {base_model_id} \\
+    --epochs {epochs} \\
+    --lr {lr} \\
+    --batch_size {batch_size} \\
+    --grad_accum_steps {grad_accum} \\
+    --max_length {max_length} \\
+    --lora_r {lora_r} --lora_alpha {lora_alpha} \\
+    --head_width {head_width} --head_routing_layers {head_routing_layers} --head_layers {head_layers} \\
+    --head_heads {head_heads} --head_feedforward {head_feedforward} \\
+    --gradient_checkpointing \\
+    --s3_target {s3_target} \\
+    --output_dir checkpoints/von-2-nano
+
+# Gate eval on the held-out suites (Von-1.2 and Jeff-0.8B dumps live in benchmarks/data/gate_cache for comparison)
+mkdir -p /opt/von/jevbench-public
+aws s3 sync s3://model-weight/jevbench-public/ /opt/von/jevbench-public/ --only-show-errors
+export JEVBENCH_PUBLIC=/opt/von/jevbench-public
+/opt/von/.venv/bin/python training/eval_decoder.py --checkpoint checkpoints/von-2-nano --name {eval_name} \\
+    --suites judge_heldout,probes,jabr_v2,jev_easy,jev_standard,jev_hard --out_dir /opt/von/gate_out || true
+aws s3 cp /opt/von/gate_out/{eval_name}.json {s3_target}/gate_cache/{eval_name}.json || true
+"""
+
 USER_DATA_TEMPLATE = """#!/bin/bash
 set -e
 exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
@@ -87,7 +136,7 @@ cd /opt/von
 /root/.local/bin/uv venv --clear /opt/von/.venv
 # PyPI ships CUDA-enabled Linux torch wheels; the old cu121 index now 404s and
 # breaks the solve. One install so torch and its dependents resolve together.
-/root/.local/bin/uv pip install --python /opt/von/.venv torch torchvision transformers datasets scipy sentencepiece tiktoken accelerate pydantic awscli
+/root/.local/bin/uv pip install --python /opt/von/.venv torch torchvision transformers datasets scipy sentencepiece tiktoken accelerate pydantic awscli {extra_pip}
 export PYTHONPATH="/opt/von/src:$PYTHONPATH"
 
 # Build the Universal Decision Corpus, including the long-context core
@@ -103,25 +152,7 @@ echo "=== Building {max_train}-sample Universal Decision Corpus (long_context={l
 # head) instead of a randomly-initialised head on the base encoder.
 {init_ckpt_block}
 
-# Detect GPUs and train with DDP
-NUM_GPUS=$(nvidia-smi -L | wc -l)
-echo "Detected $NUM_GPUS GPUs. Starting PyTorch DDP training with 8,192 Context Window..."
-
-/opt/von/.venv/bin/torchrun --nproc_per_node=$NUM_GPUS training/train_option_marker.py \\
-    --train_data data_universal/train.jsonl \\
-    --val_data data_universal/val.jsonl \\
-    --base_model_id {base_model_id} \\
-    {init_ckpt_flag} \\
-    {independent_options_flag} \\
-    --epochs {epochs} \\
-    --lr {lr} \\
-    --batch_size {batch_size} \\
-    --grad_accum_steps {grad_accum} \\
-    --max_position_embeddings 8192 \\
-    --long_ratio {long_ratio} \\
-    --s3_target {s3_target} \\
-    --output_dir checkpoints/von-long-context
-
+{train_block}
 aws s3 cp /var/log/user-data.log {s3_target}/run.log || true
 
 echo "=== [UNIVERSAL TRAINING COMPLETE - TERMINATING] ==="
@@ -159,7 +190,13 @@ def launch(
     base_encoder_s3: str = "",
     lr: float = 3e-5,
     watchdog_min: int = 0,
+    trainer: str = "marker",
+    decoder_opts: dict | None = None,
 ):
+    if trainer not in ("marker", "decoder"):
+        raise SystemExit(f"--trainer must be marker or decoder, got {trainer!r}")
+    if trainer == "decoder" and (init_checkpoint_s3 or base_encoder_s3 or independent_options):
+        raise SystemExit("--trainer decoder takes --base-model-id (a Qwen3.5 Hub id); init/base-encoder/independent-options are marker-only")
     if init_checkpoint_s3 and base_encoder_s3:
         raise SystemExit("--init-checkpoint-s3 and --base-encoder-s3 are exclusive: an init checkpoint carries its own encoder")
     market_str = "On-Demand (Guaranteed)" if on_demand else "Spot"
@@ -171,6 +208,7 @@ def launch(
     print(f"  Overlap target:   {overlap_target:.0%} gold-is-highest-overlap")
     print(f"  Synthetic rows:   {synthetic_n:,}")
     print(f"  Init checkpoint:  {init_checkpoint_s3 or '(none - fresh scoring head)'}")
+    print(f"  Trainer:          {trainer}")
     print(f"  Base encoder:     {base_encoder_s3 or base_model_id}")
     print(f"  Independent opts: {independent_options}")
     print(f"  LR:               {lr}")
@@ -225,22 +263,30 @@ def launch(
         else:
             init_ckpt_block = "echo '=== no init checkpoint: fresh scoring head on base encoder ==='"
             init_ckpt_flag = ""
+        if trainer == "decoder":
+            d = dict(max_length=4096, lora_r=64, lora_alpha=128, head_width=512, head_routing_layers=1, head_layers=2,
+                     head_heads=8, head_feedforward=2048, eval_name="von-2-nano")
+            d.update(decoder_opts or {})
+            train_block = DECODER_TRAIN_BLOCK.format(base_model_id=base_model_id, epochs=epochs, lr=lr, batch_size=batch_size,
+                                                     grad_accum=grad_accum, s3_target=s3_target, **d)
+            extra_pip = "peft safetensors flash-linear-attention"
+        else:
+            train_block = MARKER_TRAIN_BLOCK.format(base_model_id=base_model_id, init_ckpt_flag=init_ckpt_flag,
+                                                    independent_options_flag="--independent_options" if independent_options else "",
+                                                    epochs=epochs, lr=lr, batch_size=batch_size, grad_accum=grad_accum,
+                                                    long_ratio=long_ratio, s3_target=s3_target)
+            extra_pip = ""
         f.write(USER_DATA_TEMPLATE.format(
+            train_block=train_block,
+            extra_pip=extra_pip,
             epochs=epochs,
             s3_target=s3_target,
             max_train=max_train,
             long_context=long_context,
-            long_ratio=long_ratio,
             overlap_target=overlap_target,
             synthetic_n=synthetic_n,
             extra_train_block=extra_train_block,
-            batch_size=batch_size,
-            grad_accum=grad_accum,
             init_ckpt_block=init_ckpt_block,
-            init_ckpt_flag=init_ckpt_flag,
-            independent_options_flag="--independent_options" if independent_options else "",
-            base_model_id=base_model_id,
-            lr=lr,
             watchdog_min=watchdog_min,
         ))
 
@@ -353,6 +399,11 @@ if __name__ == "__main__":
     parser.add_argument("--independent-options", action="store_true",
                         help="train with the order-invariant independent-option attention mode")
     parser.add_argument("--lr", type=float, default=3e-5)
+    parser.add_argument("--trainer", default="marker", choices=["marker", "decoder"],
+                        help="marker = ModernBERT option-marker (default); decoder = Qwen3.5 + LoRA + JointSchemaHead")
+    parser.add_argument("--base-model-id", default="", help="Hub id of the backbone (decoder trainer); default Qwen/Qwen3.5-0.8B")
+    parser.add_argument("--decoder-opt", action="append", default=[],
+                        help="decoder trainer knob as key=value: max_length, lora_r, lora_alpha, head_width, head_routing_layers, head_layers, head_heads, head_feedforward, eval_name")
     parser.add_argument("--watchdog-min", type=int, default=0,
                         help="hard shutdown ceiling in minutes (0 = derive from epochs)")
     args = parser.parse_args()
@@ -376,4 +427,7 @@ if __name__ == "__main__":
         independent_options=args.independent_options,
         lr=args.lr,
         watchdog_min=args.watchdog_min,
+        trainer=args.trainer,
+        base_model_id=args.base_model_id or ("Qwen/Qwen3.5-0.8B" if args.trainer == "decoder" else "wfzyx/von"),
+        decoder_opts={k: (int(v) if v.isdigit() else v) for k, v in (o.split("=", 1) for o in args.decoder_opt)},
     )
