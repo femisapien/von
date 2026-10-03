@@ -135,7 +135,7 @@ Gate r3 against r2 and Jeff. Target: hold judge ≥ 63, recover jabr toward 79, 
 - Capacity: try us-east-1 first, then us-east-2, us-west-2; `--only-type g5.12xlarge,g6.12xlarge,g6e.12xlarge`.
 - Tarball `s3://model-weight/von-marker-src.tar.gz` must include `benchmarks/data` or eval fails on the box. Rebuild
   after any change to `training/` or `benchmarks/`.
-- AWS creds in `~/.toph.env`; `./.venv/bin/aws`. Never `pgrep -f` from the shell that owns the pattern.
+- AWS creds in `~/.aws/credentials`; `./.venv/bin/aws`. Never `pgrep -f` from the shell that owns the pattern.
 - `/tmp` does not survive reboot; scratch belongs in `~/scratch/`.
 
 ## 8. Rebuild from zero
